@@ -17,7 +17,9 @@ const COMPILERS = [
     isAsync: true,
     //Run in web worker (if possible)
     inWorker: false,
-    compile: (code) => {}
+    compile: async ({ code, options }) => {
+      return await less.render(code, options);
+    }
   },
   {
     from: ["test"],
@@ -92,6 +94,7 @@ class WebWorker {
 }
 
 class Compiler {
+  #log;
   constructor({ from, to, logLevel = "debug" }) {
     const logLevels = {
       error: ["error"],
@@ -109,35 +112,36 @@ class Compiler {
     return this;
   }
   //private method syntax I think
-  #l(method, ...data) {
+  l(method, ...data) {
     if (this.log.includes(method)) {
       console[method](...data);
     }
   }
   run(code, options) {
-    this.#l("log", "Running");
+    this.l("log", "Running");
     if (this._compiler.inWorker) {
       return new Promise(async (res) => {
-        this.#l("debug", "[Web worker] Running");
+        this.l("debug", "[Web worker] Running");
         let result = await this.worker.run(code, options);
-        this.#l("debug", "[Web worker] Done running");
+        this.l("debug", "[Web worker] Done running");
         res(result);
       });
     } else {
       if (this._compiler.isAsync) {
         return new Promise((resolve) => {
-          this._compiler.compile(code, options).then(resolve);
+          this._compiler.compile({ code, options }).then(resolve);
         });
       } else {
-        return this._compiler.compile(code, options);
+        return this._compiler.compile({ code, options });
       }
     }
-    this.#l("log", "Ran");
   }
   load(cdnProvider = "cdnjs") {
     return new Promise(async (resolve) => {
       let c = this._compiler;
-      this.#l("debug", "Compiler is: ", c);
+      //Log fn used by loadScripts
+      let l = (...a) => this.l(...a);
+      this.l("debug", "Compiler is: ", c);
       let worker;
       if (c.inWorker === true) {
         worker = new WebWorker(c.compile);
@@ -148,29 +152,30 @@ class Compiler {
           await loadScripts(resource.urls[cdnProvider]);
         } else {
           let newProvider = Object.keys(resource.urls)[0];
-          this.#l(
+          this.l(
             "warn",
             `Couldn't find CDN provider ${cdnProvider}, using ${newProvider} instead.`
           );
           await loadScripts(resource.urls[newProvider]);
         }
       }
+
       resolve();
       async function loadScripts(arr) {
         if (c.inWorker) {
           for (let s of arr) {
-            this.#l("debug", `[Web worker] Loading script %o`, s);
+            l("debug", `[Web worker] Loading script %o`, s);
             await worker.loadScript(s);
-            this.#l("debug", `[Web worker] Loaded script %o`, s);
+            l("debug", `[Web worker] Loaded script %o`, s);
           }
         } else {
           for (let url of arr) {
-            this.#l("debug", "[Main thread] Loading script %o", url);
+            l("debug", "[Main thread] Loading script %o", url);
             let s = document.createElement("script");
             s.src = url;
             document.head.appendChild(s);
             await new Promise((r) => (s.onload = r));
-            this.#l("debug", "[Main thread] Loaded script %o", url);
+            l("debug", "[Main thread] Loaded script %o", url);
           }
         }
       }
