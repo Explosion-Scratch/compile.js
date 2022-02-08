@@ -1,7 +1,7 @@
 const COMPILERS = [
   {
-    from: ["less"],
-    to: ["css"],
+    from: "less",
+    to: "css",
     requires: [
       {
         name: "less.js",
@@ -20,8 +20,8 @@ const COMPILERS = [
     }
   },
   {
-    from: ["ts", "typescript"],
-    to: ["js", "javascript"],
+    from: "ts",
+    to: "js",
     requires: [
       {
         name: "typescript",
@@ -36,6 +36,83 @@ const COMPILERS = [
     inWorker: true,
     compile: async ({ code, options }) => {
       return ts.transpileModule(code, options);
+    }
+  },
+  {
+    from: "js",
+    to: "js_beautified",
+    requires: [
+      {
+        name: "prettier",
+        urls: {
+          cdnjs: [
+            "https://cdnjs.cloudflare.com/ajax/libs/prettier/2.5.1/parser-babel.min.js",
+            "https://cdnjs.cloudflare.com/ajax/libs/prettier/2.5.1/standalone.js"
+          ]
+        }
+      }
+    ],
+    isAsync: false,
+    inWorker: true,
+    compile: ({ code, options }) => {
+      return prettier.format(code, { plugins: prettierPlugins, options });
+    }
+  },
+  {
+    from: "xml",
+    to: "json",
+    requires: [
+      {
+        name: "x2js",
+        urls: {
+          cdnjs: [
+            "https://cdnjs.cloudflare.com/ajax/libs/x2js/1.2.0/xml2json.min.js"
+          ]
+        }
+      }
+    ],
+    isAsync: false,
+    isWorker: true,
+    compile: ({ code, options }) => {
+      return new X2JS(options).xml_str2json(code);
+    }
+  },
+  {
+    from: "json",
+    to: "xml",
+    requires: [
+      {
+        name: "x2js",
+        urls: {
+          cdnjs: [
+            "https://cdnjs.cloudflare.com/ajax/libs/x2js/1.2.0/xml2json.min.js"
+          ]
+        }
+      }
+    ],
+    isAsync: false,
+    isWorker: true,
+    compile: ({ code, options }) => {
+      return new X2JS(options).json2xml_str(code);
+    }
+  },
+  {
+    from: "jade",
+    to: "html",
+    isAsync: false,
+    requires: [
+      {
+        name: "jade",
+        urls: {
+          cdnjs: [
+            "https://cdnjs.cloudflare.com/ajax/libs/jade/1.11.0/jade.min.js"
+          ]
+        }
+      }
+    ],
+    isWorker: true,
+    compile: ({ code, options }) => {
+      return jade.render(code, options);
     }
   }
 ];
@@ -103,6 +180,20 @@ class WebWorker {
 
 class Compiler {
   constructor({ from, to, logLevel = "debug" }) {
+    from = from.toLowerCase();
+    to = to.toLowerCase();
+    const synonymous = {
+      css: ["css3"],
+      jade: ["pug"],
+      html: ["html5"],
+      js: ["javascript"],
+      ts: ["typescript"]
+    };
+    let s = Object.values(synonymous).flat();
+    if (s.includes(from) || s.includes(to)) {
+      from = Object.entries(synonymous).find(([k, v]) => v.includes(from))[0];
+      to = Object.entries(synonymous).find(([k, v]) => v.includes(to))[0];
+    }
     const logLevels = {
       error: ["error"],
       warn: ["error", "warn"],
@@ -113,9 +204,18 @@ class Compiler {
     this.log = logLevels[logLevel];
     Object.assign(this, { from, to });
     //_compiler to denote it's inner
-    this._compiler = COMPILERS.find(
-      (i) => i.from.includes(from) && i.to.includes(to)
-    );
+    this._compiler = COMPILERS.find((i) => {
+      if (typeof i.from === "string") {
+        i.from = [i.from];
+      }
+      if (typeof i.to === "string") {
+        i.to = [i.to];
+      }
+      return i.from.includes(from) && i.to.includes(to);
+    });
+    if (!this._compiler) {
+      throw new Error(`Compiler ${from} -> ${to} not found.`);
+    }
     return this;
   }
   //private method syntax I think
@@ -132,6 +232,7 @@ class Compiler {
         let result = await this.worker.run(code, options);
         this.l("debug", "[Web worker] Done running, got %o as result", result);
         res(result);
+        this.worker.stop();
       });
     } else {
       if (this._compiler.isAsync) {
@@ -206,4 +307,12 @@ function hub() {
       if (this.hub[event].length === 0) delete this.hub[event];
     }
   };
+}
+
+function compile({ from, to, code, options }) {
+  return new Promise(async (res) => {
+    let c = new Compiler({ from, to });
+    await c.load();
+    res(await c.run(code, options));
+  });
 }
