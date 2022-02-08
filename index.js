@@ -1,36 +1,41 @@
 const COMPILERS = [
   {
-    //This should probably be an array right?
     from: ["less"],
     to: ["css"],
-    //cdns
     requires: [
       {
         name: "less.js",
         urls: {
-          //Should be able to import multiple
-          jsdelivr: ["https://cdn.jsdelivr.net/npm/less@4"]
+          jsdelivr: ["https://cdn.jsdelivr.net/npm/less@4"],
+          cdnjs: [
+            "https://cdnjs.cloudflare.com/ajax/libs/less.js/4.1.2/less.min.js"
+          ]
         }
       }
     ],
-    //If it's asyncronous
     isAsync: true,
-    //Run in web worker (if possible)
     inWorker: false,
     compile: async ({ code, options }) => {
       return await less.render(code, options);
     }
   },
   {
-    from: ["test"],
-    to: ["test2"],
+    from: ["ts", "typescript"],
+    to: ["js", "javascript"],
+    requires: [
+      {
+        name: "typescript",
+        urls: {
+          cdnjs: [
+            "https://cdnjs.cloudflare.com/ajax/libs/typescript/4.5.5/typescript.min.js"
+          ]
+        }
+      }
+    ],
     isAsync: false,
     inWorker: true,
-    requires: [],
-    compile: ({ code, options }) => {
-      return `CODE: ${code
-        .slice(0, 50)
-        .toUpperCase()}, options: ${JSON.stringify(options)}`;
+    compile: async ({ code, options }) => {
+      return ts.transpileModule(code, options);
     }
   }
 ];
@@ -54,9 +59,11 @@ class WebWorker {
         if (msg.type === "loadScript"){
           if (msg.method === "fetch"){
             eval(await fetch(msg.url).then(res => res.text()));
+            console.debug("Loaded %o", msg.url);
             postMessage({type: "loaded", url: msg.url, id: msg.id})
           } else if (msg.method === "import"){
             importScripts(msg.url);
+            console.debug("Loaded %o", msg.url);
             postMessage({type: "loaded", url: msg.url, id: msg.id})
           }
         }
@@ -82,19 +89,19 @@ class WebWorker {
   async stop() {
     this.worker.terminate();
   }
-  loadScript(script, method = "fetch") {
+  loadScript(script, method = "import") {
     return this.getResponse({
       type: "loadScript",
-      url: script
+      url: script,
+      method
     });
   }
-  run(code, options) {
-    return this.getResponse({ type: "run", code, options });
+  async run(code, options) {
+    return (await this.getResponse({ type: "run", code, options })).result;
   }
 }
 
 class Compiler {
-  #log;
   constructor({ from, to, logLevel = "debug" }) {
     const logLevels = {
       error: ["error"],
@@ -123,7 +130,7 @@ class Compiler {
       return new Promise(async (res) => {
         this.l("debug", "[Web worker] Running");
         let result = await this.worker.run(code, options);
-        this.l("debug", "[Web worker] Done running");
+        this.l("debug", "[Web worker] Done running, got %o as result", result);
         res(result);
       });
     } else {
