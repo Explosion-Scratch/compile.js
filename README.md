@@ -21,6 +21,10 @@ let result = await compiler.run({code: lessCode, options: {/* opts to the less c
 
 console.log(result.css); // Should be compiled to regular old CSS now!
 ```
+Oh, and a simple function to do all that for you:
+```js
+compile({from: "less", to: "css", code: "blah blah"}).then((result) => console.log(`Compiled! %o`, result))
+```
 
 And of course it supports other compilers, here they are:
 
